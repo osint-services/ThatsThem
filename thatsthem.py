@@ -1,8 +1,12 @@
-from swiftshadow import QuickProxy
 import cloudscraper
 import re
 from bs4 import BeautifulSoup
 import json
+import requests
+
+
+proxies = requests.get("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all").text
+proxy_list = [proxy.strip() for proxy in proxies.strip().split('\n')]
 
 
 def format_query(query):
@@ -32,63 +36,89 @@ def unescape(text):
 
 def extract_name_records(html_source):
     soup = BeautifulSoup(html_source, 'html.parser')
-
     results = []
 
     records = soup.find_all('div', class_='record')
-
     for record in records:
         result = {}
+        try:
+            result['name'] = unescape(record.find('div', class_='name').text.strip())
+        except AttributeError:
+            result['name'] = None
 
-        result['name'] = unescape(record.find('div', class_='name').text.strip())
-        result['timestamp'] = unescape(record.find('div', class_='timestamp').text.strip())
-        result['lives_in'] = unescape(record.find('div', class_='resides').text.replace('Lives in', '').strip())
+        try:
+            result['timestamp'] = unescape(record.find('div', class_='timestamp').text.strip())
+        except AttributeError:
+            result['timestamp'] = None
 
-        age_div = record.find('div', class_='age')
-        if age_div:
-            age_text = unescape(age_div.text.strip())
-            result['birthday'] = re.search(r'Born on (.+?) \(', age_text).group(1)
-            age_match = re.search(r'\((\d+) years old\)', age_text)
-            if age_match:
-                result['age'] = int(age_match.group(1))
+        try:
+            result['lives_in'] = unescape(record.find('div', class_='resides').text.replace('Lives in', '').strip())
+        except AttributeError:
+            result['lives_in'] = None
 
-        home_div = record.find('div', class_='location')
-        if home_div:
+        try:
+            age_div = record.find('div', class_='age')
+            if age_div:
+                age_text = unescape(age_div.text.strip())
+                result['birthday'] = re.search(r'Born on (.+?) \(', age_text).group(1)
+                age_match = re.search(r'\((\d+) years old\)', age_text)
+                if age_match:
+                    result['age'] = int(age_match.group(1))
+        except AttributeError:
+            pass
+
+        try:
+            home_div = record.find('div', class_='location')
+            if home_div:
+                result['home'] = {}
+                result['home']['address'] = unescape(home_div.find('span', class_='address').text.strip())
+
+                home_facts = home_div.find('dl', class_='subfields')
+                if home_facts:
+                    for subfield in home_facts.find_all('div', class_='subfield'):
+                        key = unescape(subfield.find('dt').text.strip().lower().replace(' ', '_'))
+                        value = unescape(subfield.find('dd').text.strip())
+                        if key == 'year_built':
+                            year_match = re.search(r'\d+', value)
+                            if year_match:
+                                result['home'][key] = int(year_match.group())
+                        else:
+                            if not "_(" in key:
+                                result['home'][key] = value
+        except AttributeError:
             result['home'] = {}
-            result['home']['address'] = unescape(home_div.find('span', class_='address').text.strip())
-
-            home_facts = record.find('dl', class_='subfields')
-            if home_facts:
-                for subfield in home_facts.find_all('div', class_='subfield'):
-                    key = unescape(subfield.find('dt').text.strip().lower().replace(' ', '_'))
-                    value = unescape(subfield.find('dd').text.strip())
-                    if key == 'year_built':
-                        year_match = re.search(r'\d+', value)
-                        if year_match:
-                            result['home'][key] = int(year_match.group())
-                    else:
-                        if not "_(" in key:
-                            result['home'][key] = value
 
         previous_addresses = []
-        previous_address_divs = record.find_all('div', class_='location')
-        for address_div in previous_address_divs[1:]:
-            address = {}
-            address['address'] = unescape(address_div.find('span', class_='address').text.strip())
-            updated_match = re.search(r'\d+', unescape(address_div.find('span', class_='timestamp').text.replace('Recorded in', '').strip()))
-            if updated_match:
-                address['updated'] = int(updated_match.group())
-            previous_addresses.append(address)
+        try:
+            previous_address_divs = record.find_all('div', class_='location')[1:]  # Adjusted to skip the first which is current address
+            for address_div in previous_address_divs:
+                address = {}
+                try:
+                    address['address'] = unescape(address_div.find('span', class_='address').text.strip())
+                    updated_match = re.search(r'\d+', unescape(address_div.find('span', class_='timestamp').text.replace('Recorded in', '').strip()))
+                    if updated_match:
+                        address['updated'] = int(updated_match.group())
+                except AttributeError:
+                    continue
+                previous_addresses.append(address)
+        except AttributeError:
+            pass
         if previous_addresses:
             result['previous_addresses'] = previous_addresses
 
-        phone_li = record.find('li', class_='phone')
-        if phone_li:
-            result['phone'] = unescape(phone_li.find('span', class_='number').text.strip())
+        try:
+            phone_li = record.find('li', class_='phone')
+            if phone_li:
+                result['phone'] = unescape(phone_li.find('span', class_='number').text.strip())
+        except AttributeError:
+            result['phone'] = None
 
-        email_li = record.find('li', class_='email')
-        if email_li:
-            result['email'] = unescape(email_li.find('span', class_='inbox').text.strip())
+        try:
+            email_li = record.find('li', class_='email')
+            if email_li:
+                result['email'] = unescape(email_li.find('span', class_='inbox').text.strip())
+        except AttributeError:
+            result['email'] = None
 
         results.append(result)
 
@@ -287,27 +317,35 @@ def search_by_name(name, location):
     
     url = f"https://thatsthem.com/name/{name}/{location}"
     
-    response = scraper.get(url, proxies=QuickProxy())
+    for proxy in proxy_list:
+        response = scraper.get(url, proxies={"http": proxy})
     
-    if "Found 0 results" in response.text:
-        return {}
+        if "Found 0 results" in response.text:
+            return {}
+        
+        if "Limit Reached" not in response.text:
+            records = extract_name_records(response.text)
+            return records
     
-    records = extract_name_records(response.text)
-    return records
+    return {}
 
 
 def search_by_phone(phone_number):
     scraper = cloudscraper.CloudScraper()
     
     url = f"https://thatsthem.com/phone/{phone_number}"
+
+    for proxy in proxy_list:
+        response = scraper.get(url, proxies={"http": proxy})
     
-    response = scraper.get(url, proxies=QuickProxy())
-    
-    if "Found 0 results" in response.text:
-        return {}
+        if "Found 0 results" in response.text:
+            return {}
         
-    records = extract_phone_records(response.text)
-    return records
+        if "Limit Reached" not in response.text:
+            records = extract_phone_records(response.text)
+            return records
+    
+    return {}
 
 
 def search_by_email(email_address):
@@ -315,13 +353,14 @@ def search_by_email(email_address):
     
     url = f"https://thatsthem.com/email/{email_address}"
     
-    response = scraper.get(url, proxies=QuickProxy())
+    for proxy in proxy_list:
+        response = scraper.get(url, proxies={"http": proxy})
     
-    with open("example.html", "w") as f:
-        f.write(response.text)
+        if "Found 0 results" in response.text:
+            return {}
         
-    if "Found 0 results" in response.text:
-        return {}
+        if "Limit Reached" not in response.text:
+            records = extract_email_records(response.text)
+            return records
     
-    records = extract_email_records(response.text)
-    return records
+    return {}
