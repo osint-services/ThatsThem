@@ -355,7 +355,6 @@ def search_by_email(email_address):
     
     for proxy in proxy_list:
         response = scraper.get(url, proxies={"http": proxy})
-        print(response.text)
         if "Please verify your request by solving the captcha below" in response.text:
             continue
     
