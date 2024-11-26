@@ -1,11 +1,14 @@
 import cloudscraper
 import re
+import httpx
+import random
+
 from bs4 import BeautifulSoup
-import json
-import requests
+from fastapi import FastAPI
 
+app = FastAPI()
 
-proxies = requests.get("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all").text
+proxies = httpx.get("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all").text
 proxy_list = [proxy.strip() for proxy in proxies.strip().split('\n')]
 
 
@@ -317,15 +320,15 @@ def search_by_name(name, location):
     
     url = f"https://thatsthem.com/name/{name}/{location}"
     
-    for proxy in proxy_list:
-        response = scraper.get(url, proxies={"http": proxy})
+    proxy = random.choice(proxy_list)
+    response = scraper.get(url, proxies={"http": proxy})
+
+    if "Found 0 results" in response.text:
+        return {}
     
-        if "Found 0 results" in response.text:
-            return {}
-        
-        if "Limit Reached" not in response.text:
-            records = extract_name_records(response.text)
-            return records
+    if "Limit Reached" not in response.text:
+        records = extract_name_records(response.text)
+        return records
     
     return {}
 
@@ -335,15 +338,15 @@ def search_by_phone(phone_number):
     
     url = f"https://thatsthem.com/phone/{phone_number}"
 
-    for proxy in proxy_list:
-        response = scraper.get(url, proxies={"http": proxy})
+    proxy = random.choice(proxy_list)
+    response = scraper.get(url, proxies={"http": proxy})
+
+    if "Found 0 results" in response.text:
+        return {}
     
-        if "Found 0 results" in response.text:
-            return {}
-        
-        if "Limit Reached" not in response.text:
-            records = extract_phone_records(response.text)
-            return records
+    if "Limit Reached" not in response.text:
+        records = extract_phone_records(response.text)
+        return records
     
     return {}
 
@@ -352,17 +355,28 @@ def search_by_email(email_address):
     scraper = cloudscraper.CloudScraper()
     
     url = f"https://thatsthem.com/email/{email_address}"
+
+    proxy = random.choice(proxy_list)
+    response = scraper.get(url, proxies={"http": proxy})
+
+    if "Found 0 results" in response.text:
+        return {}
     
-    for proxy in proxy_list:
-        response = scraper.get(url, proxies={"http": proxy})
-        if "Please verify your request by solving the captcha below" in response.text:
-            continue
-    
-        if "Found 0 results" in response.text:
-            return {}
-        
-        if "Limit Reached" not in response.text:
-            records = extract_email_records(response.text)
-            return records
+    if "Limit Reached" not in response.text:
+        records = extract_email_records(response.text)
+        return records
     
     return {}
+
+@app.get('/tt/email/{email}')
+def email_search(email: str):
+    return search_by_email(email_address=email)
+
+@app.get('/tt/phone/{phone}')
+def phone_search(phone: str):
+    print(phone)
+    return search_by_phone(phone_number=phone)
+
+@app.get('/tt/name/{name}')
+def name_search(name: str, location: str = ""):
+    return search_by_name(name=name, location=location)
