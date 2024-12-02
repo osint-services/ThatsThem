@@ -2,3 +2,4 @@ bs4
 cloudscraper
 swiftshadow
 httpx
+fastapi[standard]
