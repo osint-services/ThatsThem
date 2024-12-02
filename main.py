@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
-proxies = httpx.get("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all").text
+proxies = httpx.get("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=1000&country=all&ssl=all&anonymity=all").text
 proxy_list = [proxy.strip() for proxy in proxies.strip().split('\n')]
 
 
